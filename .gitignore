@@ -4,3 +4,5 @@
 __pycache__/
 # vscode files
 .vscode
+# autosklearn
+3.ML_model/autosklearn.ipynb

@@ -76,10 +76,30 @@ def get_cell_class(
     return None
 
 
+def get_cell_control(
+    plate: str,
+    well: str,
+    idr_metadata: pd.DataFrame,
+):
+
+    cell_annotations = idr_metadata.loc[
+        (plate == idr_metadata["Plate"]) & (idr_metadata["Well Number"].astype(int) == int(well))
+    ]
+    control_type = cell_annotations.iloc[0]["Control Type"]
+    
+    if control_type == "positive control":
+        return "positive"
+    elif control_type == "negative control":
+        return "negative"
+    else:
+        return "none"
+
+
 def complete_single_cell(
     single_cell_data: pd.DataFrame,
     trainingset_file_url: str,
     segmentation_data_dir: str,
+    idr_metadata: pd.DataFrame,
 ) -> pd.DataFrame:
     """Add Mitocheck_Object_ID and Mitocheck_Phenotypic_Class fields to single cell data by matching cell object ID to phenotypic class given in traininset.dat
 
@@ -114,6 +134,7 @@ def complete_single_cell(
             "Mitocheck_Object_ID",
             cell_segmentation_data["Mitocheck_Object_ID"].item(),
         )
+        # get class and append to single cell data
         cell_phenotypic_class = get_cell_class(
             single_cell_data, trainingset_file_url, plate, well, frame
         )
@@ -121,18 +142,17 @@ def complete_single_cell(
             print("This cell was not found in trainingset.dat!")
         single_cell_data.insert(0, "Mitocheck_Phenotypic_Class", cell_phenotypic_class)
 
+        cell_control_type = get_cell_control(plate, well, idr_metadata)
+        single_cell_data.insert(1, "Control_Type", cell_control_type)
+
     return single_cell_data
 
 
-def format_training_data(
-    mitocheck_data_version_url: str, save_path: pathlib.Path, compression: str
-) -> pd.DataFrame:
+def format_training_data(mitocheck_data_version_url: str) -> pd.DataFrame:
     """Add Mitocheck_Object_ID and Mitocheck_Phenotypic_Class fields to each single cell and compile all the cells into a single training data dataframe
 
     Args:
         mitocheck_data_version_url (str): url with path to desired version of raw mitocheck_data
-        save_path (pathlib.Path): path to save training data
-        compression (str): type of compression to use when saving dataframe
 
     Returns:
         pd.DataFrame: completed training data with Mitocheck_Object_ID and Mitocheck_Phenotypic_Class for each cell
@@ -142,20 +162,23 @@ def format_training_data(
     )
     segmentation_data_dir = f"{mitocheck_data_version_url}/2.segment_nuclei/segmented/"
     preprocessed_features_url = f"{mitocheck_data_version_url}/4.preprocess_features/data/normalized_training_data.csv.gz"
+    idr_metadata_url = f"{mitocheck_data_version_url}/3.extract_features/idr0013-screenA-annotation.csv.gz"
 
     preprocessed_features = pd.read_csv(preprocessed_features_url, compression="gzip")
     print("Loaded preprocessed features!")
+
+    idr_metadata = pd.read_csv(idr_metadata_url, dtype=object, compression="gzip")
+    print("Loaded idr metadata!")
 
     training_data = []
     for index, row in preprocessed_features.iterrows():
         single_cell = row
         completed_single_cell = complete_single_cell(
-            single_cell, trainingset_file_url, segmentation_data_dir
+            single_cell, trainingset_file_url, segmentation_data_dir, idr_metadata
         )
         training_data.append(completed_single_cell)
 
     training_data = pd.concat(training_data)
-    training_data.to_csv(save_path, compression=compression)
     return training_data
 
 
@@ -172,9 +195,9 @@ mitocheck_data_version_url = f"{base_url}/{hash}"
 output_dir = pathlib.Path("data/")
 output_dir.mkdir(parents=True, exist_ok=True)
 save_path = pathlib.Path(f"{output_dir}/training_data.csv.gz")
-compression = "gzip"
 
-training_data = format_training_data(mitocheck_data_version_url, save_path, compression)
+training_data = format_training_data(mitocheck_data_version_url)
+training_data.to_csv(save_path, compression="gzip")
 
 
 # In[4]:
